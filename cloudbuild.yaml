@@ -1,0 +1,31 @@
+steps:
+  # Docker 이미지 빌드
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/bigquery-analyzer:$COMMIT_SHA', '.']
+  
+  # Container Registry에 푸시
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/bigquery-analyzer:$COMMIT_SHA']
+  
+  # Cloud Run에 배포
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'bigquery-analyzer'
+      - '--image=gcr.io/$PROJECT_ID/bigquery-analyzer:$COMMIT_SHA'
+      - '--region=asia-northeast3'  # 서울 리전
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--port=8080'
+      - '--memory=2Gi'
+      - '--cpu=2'
+      - '--set-env-vars=CLAUDE_API_KEY=${_CLAUDE_API_KEY}'
+
+# 환경변수 대체
+substitutions:
+  _CLAUDE_API_KEY: 'your-claude-api-key'
+
+options:
+  machineType: 'E2_HIGHCPU_8'

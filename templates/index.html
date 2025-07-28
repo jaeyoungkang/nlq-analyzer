@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BigQuery 데이터 자동 분석기 (Claude)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+        .status-item.completed .icon { color: #22c55e; }
+        .status-item.active .icon { animation: spin 1s linear infinite; }
+        .status-item.error .icon { color: #ef4444; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        pre { white-space: pre-wrap; word-wrap: break-word; }
+        code { font-family: 'D2Coding', 'Courier New', monospace; }
+        button:disabled { cursor: not-allowed; opacity: 0.6; }
+        details > summary { cursor: pointer; }
+        .prose h1, .prose h2, .prose h3 { color: #1f2937; }
+        .prose code { background-color: #f3f4f6; padding: 0.125rem 0.25rem; border-radius: 0.25rem; }
+        .sql-query-block { position: relative; }
+        .copy-button { 
+            position: absolute; 
+            top: 0.5rem; 
+            right: 0.5rem; 
+            opacity: 0; 
+            transition: opacity 0.2s; 
+        }
+        .sql-query-block:hover .copy-button { opacity: 1; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div class="container mx-auto p-4 md:p-8 max-w-6xl">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-900 mb-2">BigQuery 데이터 자동 분석기</h1>
+            <p class="text-gray-600 text-lg">Claude AI를 활용하여 BigQuery 데이터셋을 분석하고 핵심 쿼리를 생성합니다.</p>
+            <div class="mt-4 text-sm text-gray-500">
+                <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded">Powered by Claude 3.5 Sonnet</span>
+            </div>
+        </header>
+
+        <div class="bg-white rounded-xl shadow-lg p-6 md:p-8 mb-8 border border-gray-200">
+            <div class="space-y-6">
+                <div>
+                    <label for="gcpProjectId" class="block text-sm font-medium text-gray-700 mb-2">
+                        GCP Project ID <span class="text-red-500">*</span>
+                    </label>
+                    <input type="text" id="gcpProjectId" 
+                           class="mt-1 block w-full px-4 py-3 bg-white border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" 
+                           placeholder="my-gcp-project"
+                           value="NLQ-ex">
+                </div>
+                <div>
+                    <label for="tableIds" class="block text-sm font-medium text-gray-700 mb-2">
+                        BigQuery Table IDs <span class="text-red-500">*</span>
+                        <span class="text-gray-500 font-normal">(쉼표 또는 줄바꿈으로 구분)</span>
+                    </label>
+                    <textarea id="tableIds" rows="4" 
+                              class="mt-1 block w-full px-4 py-3 bg-white border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" 
+                              placeholder="project.dataset.table1,&#10;project.dataset.table2">bigquery-public-data.google_ads_transparency_center.creative_stats,
+bigquery-public-data.google_ads_transparency_center.removed_creative_stats</textarea>
+                </div>
+                <div class="flex items-center justify-center space-x-4 pt-4">
+                    <button id="startButton" 
+                            class="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold py-3 px-8 rounded-lg text-lg transition-all transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-blue-300 disabled:transform-none disabled:hover:scale-100">
+                        🚀 분석 시작하기
+                    </button>
+                    <button id="viewLogsButton" 
+                            class="bg-gray-600 hover:bg-gray-700 text-white font-semibold py-3 px-8 rounded-lg text-lg transition-all transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-gray-300">
+                        📋 기록 조회
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div id="progressSection" class="bg-white rounded-xl shadow-lg p-6 md:p-8 mb-8 hidden border border-gray-200">
+            <h2 class="text-2xl font-bold mb-6 text-center text-gray-900">분석 진행 상황</h2>
+            <div id="statusContainer" class="space-y-4 mb-8"></div>
+            <h3 class="text-xl font-semibold mt-8 mb-4 text-center text-gray-700">실시간 로그</h3>
+            <div id="liveLogContainer" class="bg-gray-900 text-green-400 font-mono text-sm rounded-lg p-4 h-48 overflow-y-auto border">
+            </div>
+        </div>
+        
+        <div id="resultsSection" class="space-y-8 hidden">
+            <div id="profilingReportCard" class="bg-white rounded-xl shadow-lg p-6 md:p-8 border border-gray-200">
+                <h2 class="text-2xl font-bold mb-4 text-gray-900">📊 데이터 프로파일링 리포트</h2>
+                <div id="profilingReportContent" class="space-y-6">
+                    <!-- 실시간으로 섹션별 내용이 여기에 추가됩니다 -->
+                </div>
+            </div>
+            <div id="sqlQueriesCard" class="bg-white rounded-xl shadow-lg p-6 md:p-8 border border-gray-200">
+                <h2 class="text-2xl font-bold mb-4 text-gray-900">💻 생성된 SQL 쿼리</h2>
+                <div id="sqlQueriesContent" class="space-y-6">
+                    <!-- 실시간으로 개별 쿼리가 여기에 추가됩니다 -->
+                </div>
+            </div>
+        </div>
+
+        <div id="logsSection" class="bg-white rounded-xl shadow-lg p-6 md:p-8 mb-8 hidden border border-gray-200">
+            <h2 class="text-2xl font-bold mb-6 text-center text-gray-900">작업 기록</h2>
+            <div id="logsContainer" class="space-y-4"></div>
+        </div>
+
+        <footer class="text-center text-gray-500 text-sm mt-16 py-8 border-t border-gray-200">
+            <p>© 2024 BigQuery 데이터 분석기. Claude AI 기반 자동 분석 도구.</p>
+        </footer>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            // Element references
+            const gcpProjectId = document.getElementById('gcpProjectId');
+            const tableIds = document.getElementById('tableIds');
+            const startButton = document.getElementById('startButton');
+            const viewLogsButton = document.getElementById('viewLogsButton');
+            const progressSection = document.getElementById('progressSection');
+            const statusContainer = document.getElementById('statusContainer');
+            const liveLogContainer = document.getElementById('liveLogContainer');
+            const resultsSection = document.getElementById('resultsSection');
+            const profilingReportContent = document.getElementById('profilingReportContent');
+            const sqlQueriesContent = document.getElementById('sqlQueriesContent');
+            const logsSection = document.getElementById('logsSection');
+            const logsContainer = document.getElementById('logsContainer');
+
+            const steps = [
+                { id: 0, text: "API 초기화" },
+                { id: 1, text: "메타데이터 추출" },
+                { id: 2, text: "프로파일링 리포트 생성" },
+                { id: 3, text: "SQL 쿼리 생성" },
+                { id: 4, text: "분석 완료" }
+            ];
+
+            function validateInputs() {
+                const projectId = gcpProjectId.value.trim();
+                const tables = tableIds.value.trim();
+                const isValid = projectId && tables;
+                startButton.disabled = !isValid;
+                
+                if (isValid) {
+                    startButton.classList.remove('bg-gray-400');
+                    startButton.classList.add('bg-blue-600', 'hover:bg-blue-700');
+                } else {
+                    startButton.classList.add('bg-gray-400');
+                    startButton.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+                }
+            }
+
+            gcpProjectId.addEventListener('input', validateInputs);
+            tableIds.addEventListener('input', validateInputs);
+            validateInputs();
+
+            function initializeStatus() {
+                statusContainer.innerHTML = '';
+                liveLogContainer.innerHTML = '';
+                steps.forEach(step => {
+                    const statusItem = document.createElement('div');
+                    statusItem.id = `status-${step.id}`;
+                    statusItem.className = 'status-item flex items-center text-gray-500 p-3 rounded-lg bg-gray-50';
+                    statusItem.innerHTML = `
+                        <span class="icon w-6 h-6 mr-4 flex-shrink-0">⏳</span>
+                        <span class="font-medium">${step.text}</span>
+                    `;
+                    statusContainer.appendChild(statusItem);
+                });
+            }
+
+            function updateStatus(payload) {
+                const { step, message } = payload;
+                const itemToUpdate = document.getElementById(`status-${step}`);
+                if (!itemToUpdate) return;
+                
+                const icon = itemToUpdate.querySelector('.icon');
+                const text = itemToUpdate.querySelector('span:last-child');
+                
+                // 이전 단계들을 완료 상태로 변경
+                for (let i = 0; i < step; i++) {
+                    const prevStepEl = document.getElementById(`status-${i}`);
+                    if (prevStepEl && !prevStepEl.classList.contains('error')) {
+                       prevStepEl.classList.remove('text-gray-500', 'active', 'bg-gray-50');
+                       prevStepEl.classList.add('completed', 'text-green-700', 'bg-green-50');
+                       prevStepEl.querySelector('.icon').innerHTML = '✅';
+                    }
+                }
+
+                // 현재 단계를 활성 상태로 변경
+                itemToUpdate.classList.remove('text-gray-500', 'bg-gray-50');
+                itemToUpdate.classList.add('active', 'text-blue-700', 'bg-blue-50');
+                text.textContent = message;
+                icon.innerHTML = '<svg class="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
+            }
+            
+            function appendLogMessage(payload) {
+                const logLine = document.createElement('div');
+                logLine.innerHTML = `<span class="text-yellow-400">[${new Date().toLocaleTimeString()}]</span> <span class="text-green-400">${payload.message}</span>`;
+                liveLogContainer.appendChild(logLine);
+                liveLogContainer.scrollTop = liveLogContainer.scrollHeight;
+            }
+
+            function handleFinalStatus(isError, message) {
+                if (isError) {
+                    const errorStep = document.getElementById('status-0');
+                    if (errorStep) {
+                        errorStep.classList.add('error', 'text-red-700', 'bg-red-50');
+                        errorStep.querySelector('.icon').innerHTML = '❌';
+                        errorStep.querySelector('span:last-child').textContent = message || '오류 발생';
+                    }
+                } else {
+                    // 모든 단계를 완료 상태로 변경
+                    steps.forEach((step, index) => {
+                        const stepEl = document.getElementById(`status-${index}`);
+                        if (stepEl) {
+                            stepEl.classList.remove('active', 'text-blue-700', 'bg-blue-50');
+                            stepEl.classList.add('completed', 'text-green-700', 'bg-green-50');
+                            stepEl.querySelector('.icon').innerHTML = '✅';
+                        }
+                    });
+                }
+                
+                startButton.disabled = false;
+                startButton.textContent = isError ? '🔄 다시 시작하기' : '🚀 분석 다시 시작하기';
+                startButton.classList.remove('bg-gray-400');
+                startButton.classList.add('bg-blue-600', 'hover:bg-blue-700');
+                viewLogsButton.disabled = false;
+            }
+
+            function copyToClipboard(text) {
+                navigator.clipboard.writeText(text).then(() => {
+                    const notification = document.createElement('div');
+                    notification.className = 'fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg z-50';
+                    notification.textContent = '클립보드에 복사되었습니다.';
+                    document.body.appendChild(notification);
+                    setTimeout(() => notification.remove(), 2000);
+                });
+            }
+
+            function addReportSection(sectionData) {
+                const { section, title, content } = sectionData;
+                
+                const sectionElement = document.createElement('div');
+                sectionElement.id = `section-${section}`;
+                sectionElement.className = 'mb-6 border border-gray-200 rounded-lg overflow-hidden';
+                
+                // 섹션별 아이콘
+                const icons = {
+                    'overview': '📋',
+                    'table_analysis': '📊',
+                    'relationships': '🔗',
+                    'business_questions': '❓',
+                    'recommendations': '💡'
+                };
+                
+                sectionElement.innerHTML = `
+                    <div class="bg-gradient-to-r from-blue-50 to-indigo-50 px-6 py-4 border-b border-gray-200">
+                        <h3 class="text-lg font-bold text-gray-800 flex items-center">
+                            <span class="text-2xl mr-3">${icons[section] || '📄'}</span>${title}
+                        </h3>
+                    </div>
+                    <div class="p-6 bg-white">
+                        <div class="prose max-w-none">${marked.parse(content)}</div>
+                    </div>
+                `;
+                
+                profilingReportContent.appendChild(sectionElement);
+                sectionElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+
+            function addSqlQuery(queryData) {
+                const { query_id, description, content } = queryData;
+                
+                const queryElement = document.createElement('div');
+                queryElement.id = `query-${query_id}`;
+                queryElement.className = 'border border-gray-200 rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow';
+                
+                // SQL 코드 추출
+                const sqlMatch = content.match(/```sql\n([\s\S]*?)```/);
+                const sqlCode = sqlMatch ? sqlMatch[1].trim() : '';
+                
+                queryElement.innerHTML = `
+                    <div class="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-3">
+                                <span class="bg-blue-500 text-white text-sm font-bold rounded-full w-8 h-8 flex items-center justify-center">${query_id}</span>
+                                <div>
+                                    <h3 class="text-lg font-semibold text-gray-800">${description}</h3>
+                                    <p class="text-sm text-gray-500 mt-1">BigQuery SQL 쿼리</p>
+                                </div>
+                            </div>
+                            <div class="flex space-x-2">
+                                <button class="query-copy-btn bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm transition-colors">
+                                    📋 복사
+                                </button>
+                                <button class="query-toggle-btn bg-gray-500 hover:bg-gray-600 text-white px-3 py-1 rounded text-sm transition-colors">
+                                    👁️ 보기
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="query-content hidden p-6 bg-white space-y-4">
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                            <h4 class="font-semibold text-blue-800 mb-2">📝 쿼리 설명</h4>
+                            <div class="text-blue-700 text-sm prose max-w-none">${marked.parse(content.replace(/```sql[\s\S]*?```/g, ''))}</div>
+                        </div>
+                        <div class="bg-gray-900 rounded-lg overflow-hidden">
+                            <div class="bg-gray-800 px-4 py-2 flex items-center justify-between">
+                                <span class="text-gray-300 text-sm font-medium">SQL Query</span>
+                                <span class="text-gray-400 text-xs">BigQuery Standard SQL</span>
+                            </div>
+                            <pre class="p-4 text-green-400 font-mono text-sm overflow-x-auto"><code>${sqlCode}</code></pre>
+                        </div>
+                    </div>
+                `;
+                
+                // 이벤트 리스너 추가
+                const copyBtn = queryElement.querySelector('.query-copy-btn');
+                const toggleBtn = queryElement.querySelector('.query-toggle-btn');
+                const queryContent = queryElement.querySelector('.query-content');
+                
+                copyBtn.addEventListener('click', function() {
+                    copyToClipboard(sqlCode);
+                    this.innerHTML = '✅ 복사됨';
+                    setTimeout(() => {
+                        this.innerHTML = '📋 복사';
+                    }, 2000);
+                });
+                
+                toggleBtn.addEventListener('click', function() {
+                    const isHidden = queryContent.classList.contains('hidden');
+                    
+                    if (isHidden) {
+                        queryContent.classList.remove('hidden');
+                        this.innerHTML = '🙈 숨기기';
+                    } else {
+                        queryContent.classList.add('hidden');
+                        this.innerHTML = '👁️ 보기';
+                    }
+                });
+                
+                sqlQueriesContent.appendChild(queryElement);
+                queryElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+
+            function renderSql(sqlText) {
+                if (!sqlText) return '';
+                
+                const sqlRegex = /```sql\n([\s\S]*?)```/g;
+                const formattedSql = sqlText.replace(sqlRegex, (match, code) => {
+                    const cleanCode = code.trim();
+                    const encodedCode = cleanCode.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+                    return `<div class="sql-query-block relative">
+                        <button type="button" class="copy-button bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded text-xs transition-opacity" data-code="${encodedCode}">📋 복사</button>
+                        <pre class="bg-gray-900 text-white rounded-lg p-4 font-mono text-sm overflow-x-auto"><code>${cleanCode}</code></pre>
+                    </div>`;
+                });
+                return marked.parse(formattedSql);
+            }
+
+            startButton.addEventListener('click', function () {
+                this.disabled = true;
+                this.textContent = '⏳ 분석 진행 중...';
+                this.classList.add('bg-gray-400');
+                this.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+                viewLogsButton.disabled = true;
+                
+                initializeStatus();
+                progressSection.classList.remove('hidden');
+                resultsSection.classList.add('hidden');
+                logsSection.classList.add('hidden');
+                profilingReportContent.innerHTML = '';
+                sqlQueriesContent.innerHTML = '';
+
+                const projectIdVal = gcpProjectId.value.trim();
+                const tablesVal = tableIds.value.trim().split(/[,\n]+/).map(s => s.trim()).filter(Boolean).join(',');
+                const eventSourceUrl = `/run-profiler?projectId=${encodeURIComponent(projectIdVal)}&tableIds=${encodeURIComponent(tablesVal)}`;
+                const eventSource = new EventSource(eventSourceUrl);
+
+                eventSource.onmessage = function (event) {
+                    const eventData = JSON.parse(event.data);
+                    
+                    switch (eventData.type) {
+                        case 'status':
+                            updateStatus(eventData.payload);
+                            break;
+                        case 'log':
+                            appendLogMessage(eventData.payload);
+                            break;
+                        case 'report_section':
+                            if (!resultsSection.classList.contains('hidden')) {
+                                addReportSection(eventData.payload);
+                            } else {
+                                resultsSection.classList.remove('hidden');
+                                addReportSection(eventData.payload);
+                            }
+                            break;
+                        case 'sql_query':
+                            addSqlQuery(eventData.payload);
+                            break;
+                        case 'error':
+                            appendLogMessage({ message: `❌ 오류: ${eventData.payload.message}` });
+                            handleFinalStatus(true, eventData.payload.message);
+                            eventSource.close();
+                            break;
+                    }
+
+                    if (eventData.type === 'status' && eventData.payload.step === 4) {
+                        handleFinalStatus(false);
+                        eventSource.close();
+                    }
+                };
+
+                eventSource.onerror = function(err) {
+                    console.error("EventSource failed:", err);
+                    appendLogMessage({ message: "❌ 서버 연결 오류 발생." });
+                    handleFinalStatus(true, "서버 연결에 실패했습니다.");
+                    eventSource.close();
+                };
+            });
+
+            viewLogsButton.addEventListener('click', async function() {
+                progressSection.classList.add('hidden');
+                resultsSection.classList.add('hidden');
+                logsSection.classList.remove('hidden');
+                logsContainer.innerHTML = '<div class="text-center"><div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div><p class="mt-2">기록을 불러오는 중...</p></div>';
+
+                try {
+                    const response = await fetch('/logs');
+                    const logs = await response.json();
+
+                    if (logs.length === 0) {
+                        logsContainer.innerHTML = '<div class="text-center text-gray-500 py-8"><p class="text-lg">📝 저장된 작업 기록이 없습니다.</p><p class="text-sm mt-2">분석을 실행하면 기록이 여기에 표시됩니다.</p></div>';
+                        return;
+                    }
+
+                    logsContainer.innerHTML = '';
+                    logs.forEach((log, index) => {
+                        const statusColor = log.status === '완료' ? 'text-green-600 bg-green-50' : (log.status === '실패' ? 'text-red-600 bg-red-50' : 'text-yellow-600 bg-yellow-50');
+                        const statusIcon = log.status === '완료' ? '✅' : (log.status === '실패' ? '❌' : '⏳');
+                        const duration = log.end_time ? 
+                            `${Math.round((new Date(log.end_time) - new Date(log.start_time)) / 1000)}초` : 
+                            'N/A';
+                        
+                        const logElement = document.createElement('details');
+                        logElement.className = 'bg-gray-50 border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow';
+                        logElement.innerHTML = `
+                            <summary class="flex justify-between items-center p-4 cursor-pointer hover:bg-gray-100 rounded-lg">
+                                <div class="flex items-center space-x-3">
+                                    <span class="text-lg">${statusIcon}</span>
+                                    <div>
+                                        <span class="font-semibold ${statusColor} px-2 py-1 rounded text-sm">${log.status}</span>
+                                        <span class="text-gray-600 ml-2">${new Date(log.start_time).toLocaleString()}</span>
+                                    </div>
+                                </div>
+                                <div class="text-right text-sm text-gray-500">
+                                    <div>${log.project_id}</div>
+                                    <div>소요시간: ${duration}</div>
+                                </div>
+                            </summary>
+                            <div class="px-4 pb-4 border-t border-gray-200 mt-2 pt-4">
+                                <div class="grid md:grid-cols-2 gap-6">
+                                    <div>
+                                        <h4 class="font-bold mb-3 text-gray-700">📊 프로파일링 리포트</h4>
+                                        <div class="prose prose-sm max-w-none bg-white p-4 rounded border max-h-64 overflow-y-auto">
+                                            ${log.profiling_report && log.profiling_report.full_report ? 
+                                                marked.parse(log.profiling_report.full_report) : 
+                                                '리포트가 생성되지 않았습니다.'}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <h4 class="font-bold mb-3 text-gray-700">💻 SQL 쿼리</h4>
+                                        <div class="prose prose-sm max-w-none bg-white p-4 rounded border max-h-64 overflow-y-auto">
+                                            ${log.sql_queries && Array.isArray(log.sql_queries) ? 
+                                                log.sql_queries.map(query => `
+                                                    <div class="mb-4">
+                                                        <h5 class="font-medium text-sm text-gray-600 mb-2">쿼리 ${query.id}: ${query.description}</h5>
+                                                        ${renderSql(query.query)}
+                                                    </div>
+                                                `).join('') : 
+                                                '쿼리가 생성되지 않았습니다.'}
+                                        </div>
+                                    </div>
+                                </div>
+                                ${log.error_message ? `
+                                    <div class="mt-4 p-4 bg-red-50 border border-red-200 rounded">
+                                        <h4 class="font-bold text-red-700 mb-2">❌ 오류 메시지</h4>
+                                        <p class="text-red-600 text-sm">${log.error_message}</p>
+                                    </div>
+                                ` : ''}
+                                <div class="mt-4 text-xs text-gray-500 border-t pt-2">
+                                    테이블: ${log.table_ids ? log.table_ids.join(', ') : 'N/A'} | 
+                                    작업 ID: ${log.id}
+                                </div>
+                            </div>
+                        `;
+                        logsContainer.appendChild(logElement);
+                        
+                        // 로그에서 복사 버튼에 이벤트 리스너 추가
+                        setTimeout(() => {
+                            const container = logElement.querySelector('.prose');
+                            if (container) {
+                                container.querySelectorAll('.copy-button').forEach(button => {
+                                    button.addEventListener('click', function() {
+                                        const code = this.getAttribute('data-code');
+                                        const decodedCode = code.replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+                                        copyToClipboard(decodedCode);
+                                    });
+                                });
+                            }
+                        }, 0);
+                    });
+                } catch (error) {
+                    logsContainer.innerHTML = '<div class="text-center text-red-500 py-8"><p class="text-lg">❌ 기록을 불러오는 중 오류가 발생했습니다.</p><p class="text-sm mt-2">잠시 후 다시 시도해주세요.</p></div>';
+                    console.error('Error fetching logs:', error);
+                }
+            });
+        });
+    </script>
+</body>
+</html>

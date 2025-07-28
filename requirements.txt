@@ -1,0 +1,6 @@
+flask==2.3.3
+anthropic>=0.59.0
+google-cloud-bigquery==3.11.4
+google-cloud-firestore==2.11.1
+python-dotenv==1.0.0
+gunicorn==21.2.0
