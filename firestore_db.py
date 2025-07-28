@@ -25,20 +25,21 @@ class FirestoreManager:
         """새 분석 세션 생성"""
         if not self.db:
             return session_data.get('id', str(datetime.now().timestamp()))
-        
+    
         try:
             session_id = session_data.get('id', str(datetime.now().timestamp()).replace('.', ''))
             
+            clean_data = self._sanitize_data(session_data)
             # 세션 메타데이터 저장
             session_ref = self.db.collection('analysis_sessions').document(session_id)
             session_ref.set({
                 'session_id': session_id,
-                'project_id': session_data['project_id'],
-                'table_ids': session_data['table_ids'],
-                'status': session_data['status'],
-                'start_time': session_data['start_time'],
-                'end_time': session_data.get('end_time'),
-                'error_message': session_data.get('error_message'),
+                'project_id': clean_data['project_id'],
+                'table_ids': clean_data['table_ids'],
+                'status': clean_data['status'],
+                'start_time': clean_data['start_time'],
+                'end_time': clean_data.get('end_time', ''),
+                'error_message': clean_data.get('error_message', ''),
                 'created_at': firestore.SERVER_TIMESTAMP,
                 'log_count': 0,
                 'last_updated': firestore.SERVER_TIMESTAMP
@@ -380,6 +381,26 @@ class FirestoreManager:
         except Exception as e:
             logger.error(f"검색 중 오류: {e}")
             return []
+        
+    def _sanitize_data(self, data: Dict) -> Dict:
+        """Firestore 저장을 위해 데이터를 안전하게 변환"""
+        sanitized = {}
+        
+        for key, value in data.items():
+            if value is None:
+                sanitized[key] = ""
+            elif isinstance(value, (int, float)):
+                sanitized[key] = str(value)
+            elif isinstance(value, list):
+                # 리스트의 모든 요소를 문자열로 변환
+                sanitized[key] = [str(item) for item in value]
+            elif isinstance(value, dict):
+                # 중첩 딕셔너리도 재귀적으로 변환
+                sanitized[key] = self._sanitize_data(value)
+            else:
+                sanitized[key] = str(value)
+        
+        return sanitized
 
 # 글로벌 데이터베이스 매니저 인스턴스
 db_manager = FirestoreManager()

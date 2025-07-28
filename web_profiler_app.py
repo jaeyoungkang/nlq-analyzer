@@ -101,8 +101,11 @@ class BigQueryAnalyzer:
         """
         전체 분석 프로세스를 실행하고 진행 상황을 스트리밍하며, 최종 결과를 로깅합니다.
         """
+        project_id = str(project_id)
+        table_ids = [str(tid) for tid in table_ids]  # 모든 table_id를 문자열로 변환
+        
         log_entry = {
-            "id": int(time.time() * 1000),
+            "id": str(int(time.time() * 1000)),  # 문자열로 변환
             "start_time": datetime.datetime.now().isoformat(),
             "end_time": None,
             "project_id": project_id,

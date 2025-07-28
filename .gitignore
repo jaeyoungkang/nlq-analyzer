@@ -1,2 +1,43 @@
-# env files (can opt-in for committing if needed)
-.env*
+# 환경변수 및 보안 파일
+.env
+.env.local
+.env.production
+*.key
+*.pem
+service-account-key.json
+credentials.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+*.egg-info/
+.Python
+
+# 가상환경
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# 로그
+*.log
+logs/
+
+# 데이터베이스
+*.db
+*.sqlite
+data/
+
+# 임시 파일
+tmp/
+.cache/
+.pytest_cache/
